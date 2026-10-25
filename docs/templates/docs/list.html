@@ -1,0 +1,59 @@
+{% extends "docs/base.html" %}
+{% block body %}
+<div class="container">
+  {% if messages %}
+  <ul class="messages">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  <div class="card">
+    <div class="row">
+      <form method="post" action="{% url 'doc_create' %}" style="margin:0">{% csrf_token %}
+        <button class="btn-primary" type="submit">+ New document</button>
+      </form>
+      <div class="spacer"></div>
+      <form method="post" action="{% url 'doc_upload' %}" enctype="multipart/form-data" class="row" style="margin:0">
+        {% csrf_token %}
+        <input type="file" name="file" accept="{{ accept }}" required aria-label="File to import">
+        <button type="submit">Import file</button>
+      </form>
+    </div>
+    <p class="muted" style="margin:8px 0 0">
+      Import creates a new editable document. Supported file types: {{ supported }} (max 2 MB).
+    </p>
+  </div>
+
+  <div class="card">
+    <h2 class="section">My documents</h2>
+    <ul class="doc-list">
+      {% for doc in owned %}
+      <li>
+        <a class="doc-title" href="{% url 'doc_detail' doc.pk %}">{{ doc.title }}</a>
+        <span class="badge owner">Owned by me</span>
+        {% if doc.shares.count %}<span class="muted">shared with {{ doc.shares.count }}</span>{% endif %}
+        <span class="spacer"></span>
+        <span class="muted">Updated {{ doc.updated_at|date:"M j, H:i" }}</span>
+      </li>
+      {% empty %}
+      <li class="muted">No documents yet. Create one or import a file.</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2 class="section">Shared with me</h2>
+    <ul class="doc-list">
+      {% for doc in shared %}
+      <li>
+        <a class="doc-title" href="{% url 'doc_detail' doc.pk %}">{{ doc.title }}</a>
+        <span class="badge {{ doc.my_role }}">{% if doc.my_role == "edit" %}Can edit{% else %}View only{% endif %}</span>
+        <span class="muted">from {{ doc.owner.username }}</span>
+        <span class="spacer"></span>
+        <span class="muted">Updated {{ doc.updated_at|date:"M j, H:i" }}</span>
+      </li>
+      {% empty %}
+      <li class="muted">Nothing has been shared with you yet.</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

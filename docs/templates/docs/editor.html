@@ -1,0 +1,196 @@
+{% extends "docs/base.html" %}
+{% block title %}{{ doc.title }} · Ajaia Docs{% endblock %}
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+{% endblock %}
+{% block body %}
+<div class="editor-wrap">
+  <div class="row" style="margin-bottom:8px">
+    <a href="{% url 'doc_list' %}">&larr; All documents</a>
+    <span class="badge {{ role }}">
+      {% if role == "owner" %}Owned by me{% elif role == "edit" %}Shared &middot; can edit{% else %}Shared &middot; view only{% endif %}
+    </span>
+    {% if not is_owner %}<span class="muted">owner: {{ doc.owner.username }}</span>{% endif %}
+    <span class="spacer"></span>
+    <span id="status" class="status" role="status" aria-live="polite">{% if can_edit %}All changes saved{% endif %}</span>
+  </div>
+
+  {% if not can_edit %}
+  <div class="readonly-banner">You have view-only access to this document.</div>
+  {% endif %}
+
+  <input id="title" class="title-input" type="text" maxlength="200" value="{{ doc.title }}"
+         aria-label="Document title" {% if not can_edit %}disabled{% endif %}>
+
+  <div id="editor"></div>
+
+  {% if is_owner %}
+  <div class="card share-panel">
+    <h2 class="section">Sharing</h2>
+    <div class="row">
+      <input type="text" id="share-username" placeholder="Username (e.g. bob)" aria-label="Username to share with">
+      <select id="share-role" aria-label="Access level">
+        <option value="view">Can view</option>
+        <option value="edit">Can edit</option>
+      </select>
+      <button id="share-btn" class="btn-primary" type="button">Share</button>
+    </div>
+    <div id="share-error" class="inline-error" role="alert"></div>
+    <div id="share-list">
+      {% for s in shares %}
+      <div class="share-row" data-username="{{ s.user.username }}">
+        <strong>{{ s.user.username }}</strong>
+        <span class="badge {{ s.role }}">{% if s.role == "edit" %}Can edit{% else %}View only{% endif %}</span>
+        <span class="spacer"></span>
+        <button type="button" class="unshare btn-danger">Remove</button>
+      </div>
+      {% endfor %}
+    </div>
+    <p id="share-empty" class="muted" {% if shares %}hidden{% endif %}>Not shared with anyone yet.</p>
+    <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+    <form method="post" action="{% url 'doc_delete' doc.pk %}" onsubmit="return confirm('Delete this document for everyone?');">
+      {% csrf_token %}
+      <button type="submit" class="btn-danger">Delete document</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+{{ doc.content|json_script:"initial-content" }}
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+<script>
+(function () {
+  const CAN_EDIT = {{ can_edit|yesno:"true,false" }};
+  const SAVE_URL = "{% url 'doc_save' doc.pk %}";
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  const statusEl = document.getElementById("status");
+  const titleEl = document.getElementById("title");
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle("error", !!isError);
+  }
+
+  async function post(url, payload) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrf },
+      body: JSON.stringify(payload),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.error || "Request failed (" + res.status + ")");
+    }
+    return data;
+  }
+
+  const quill = new Quill("#editor", {
+    theme: "snow",
+    readOnly: !CAN_EDIT,
+    modules: {
+      toolbar: CAN_EDIT ? [
+        [{ header: [1, 2, 3, false] }],
+        ["bold", "italic", "underline"],
+        [{ list: "ordered" }, { list: "bullet" }],
+        ["clean"],
+      ] : false,
+    },
+    placeholder: CAN_EDIT ? "Start typing…" : "",
+  });
+  quill.clipboard.dangerouslyPasteHTML(JSON.parse(document.getElementById("initial-content").textContent), "silent");
+
+  if (!CAN_EDIT) return;
+
+  // --- autosave (debounced) ---
+  let timer = null, pending = {}, inflight = false;
+
+  function schedule(fields) {
+    Object.assign(pending, fields);
+    setStatus("Unsaved changes…");
+    clearTimeout(timer);
+    timer = setTimeout(flush, 800);
+  }
+
+  async function flush() {
+    if (inflight) { timer = setTimeout(flush, 400); return; }
+    const payload = pending; pending = {};
+    if (!Object.keys(payload).length) return;
+    inflight = true;
+    setStatus("Saving…");
+    try {
+      await post(SAVE_URL, payload);
+      setStatus(Object.keys(pending).length ? "Unsaved changes…" : "All changes saved");
+    } catch (err) {
+      pending = Object.assign({}, payload, pending); // retry later with the newest values
+      setStatus("Save failed: " + err.message, true);
+      timer = setTimeout(flush, 4000);
+    } finally {
+      inflight = false;
+    }
+  }
+
+  quill.on("text-change", (_d, _o, source) => {
+    if (source === "user") schedule({ content: quill.getSemanticHTML() });
+  });
+  titleEl.addEventListener("input", () => {
+    if (titleEl.value.trim()) schedule({ title: titleEl.value });
+    else setStatus("Title cannot be empty", true);
+  });
+  window.addEventListener("beforeunload", (e) => {
+    if (Object.keys(pending).length || inflight) { e.preventDefault(); e.returnValue = ""; }
+  });
+
+  // --- sharing (owner only) ---
+  const shareBtn = document.getElementById("share-btn");
+  if (shareBtn) {
+    const errEl = document.getElementById("share-error");
+    const listEl = document.getElementById("share-list");
+    const emptyEl = document.getElementById("share-empty");
+    const SHARE_URL = "{% url 'share_add' doc.pk %}";
+    const UNSHARE_URL = "{% url 'share_remove' doc.pk %}";
+
+    function renderRow(username, role) {
+      let row = listEl.querySelector('[data-username="' + CSS.escape(username) + '"]');
+      if (!row) {
+        row = document.createElement("div");
+        row.className = "share-row";
+        row.dataset.username = username;
+        listEl.appendChild(row);
+      }
+      row.innerHTML = "";
+      const name = document.createElement("strong"); name.textContent = username;
+      const badge = document.createElement("span");
+      badge.className = "badge " + role; badge.textContent = role === "edit" ? "Can edit" : "View only";
+      const sp = document.createElement("span"); sp.className = "spacer";
+      const rm = document.createElement("button");
+      rm.type = "button"; rm.className = "unshare btn-danger"; rm.textContent = "Remove";
+      row.append(name, badge, sp, rm);
+      emptyEl.hidden = true;
+    }
+
+    shareBtn.addEventListener("click", async () => {
+      errEl.textContent = "";
+      const username = document.getElementById("share-username").value.trim();
+      const role = document.getElementById("share-role").value;
+      try {
+        const data = await post(SHARE_URL, { username, role });
+        renderRow(data.username, data.role);
+        document.getElementById("share-username").value = "";
+      } catch (err) { errEl.textContent = err.message; }
+    });
+
+    listEl.addEventListener("click", async (e) => {
+      if (!e.target.classList.contains("unshare")) return;
+      const row = e.target.closest(".share-row");
+      errEl.textContent = "";
+      try {
+        await post(UNSHARE_URL, { username: row.dataset.username });
+        row.remove();
+        if (!listEl.children.length) emptyEl.hidden = false;
+      } catch (err) { errEl.textContent = err.message; }
+    });
+  }
+})();
+</script>
+{% endblock %}

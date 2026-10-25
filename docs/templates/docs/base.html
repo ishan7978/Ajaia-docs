@@ -1,0 +1,25 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>{% block title %}Ajaia Docs{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'docs/app.css' %}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{% url 'doc_list' %}">Ajaia <span>Docs</span></a>
+    {% if user.is_authenticated %}
+    <div class="who">
+      <span>Signed in as <strong>{{ user.username }}</strong></span>
+      <form method="post" action="{% url 'logout' %}" style="margin:0">{% csrf_token %}
+        <button type="submit">Log out</button>
+      </form>
+    </div>
+    {% endif %}
+  </header>
+  {% block body %}{% endblock %}
+</body>
+</html>

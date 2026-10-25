@@ -1,0 +1,19 @@
+# Render Blueprint (free tier). Deploy: New > Blueprint > pick this repo.
+# NOTE: free web services have an ephemeral disk, so SQLite data resets on each
+# redeploy/restart. start command re-runs migrations and re-seeds the demo
+# users, so reviewers always get alice/bob/carol. For durable data, add a free
+# Postgres and set DATABASE_URL (see README).
+services:
+  - type: web
+    name: ajaia-docs
+    runtime: python
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "python manage.py migrate --no-input && python manage.py seed_demo && gunicorn config.wsgi --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: DEBUG
+        value: "0"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: "3.13.0"
