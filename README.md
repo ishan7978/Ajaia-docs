@@ -2,7 +2,7 @@
 
 A small full-stack Google-Docs-style editor: create, rename, rich-text edit, import files, and share documents between users.
 
-**Live demo:** `<PASTE YOUR RENDER URL HERE>`
+**Live demo:** `< https://ajaia-docs-vxb9.onrender.com >`
 **Test accounts** (password for all: `demo1234`): `alice`, `bob`, `carol`
 
 ## Features
